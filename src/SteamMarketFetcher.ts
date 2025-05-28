@@ -2,13 +2,11 @@ import SteamCommunity from "steamcommunity";
 import { getAllItemNames, fetchPrice } from "./utils/apiUtils";
 import { loadPrices, loadState, saveState, createDirectories, savePrices } from "./utils/fileUtils";
 import { getWeightedAveragePrice } from "./utils/priceUtils";
-import { sha1 } from "js-sha1";
 import * as fsPromises from "fs/promises";
 import * as colors from 'colors';
 
 const dir = `./static`;
 const dirPrices = `./static/prices`;
-const dirPricehistory = `./static/pricehistory`;
 const maxDuration = 3600 * 1000 * 5.7;
 const startTime = Date.now();
 
@@ -20,7 +18,7 @@ export class SteamMarketFetcher {
     constructor(private accountName: string, private password: string) { }
 
     async run() {
-        createDirectories([dir, dirPrices, dirPricehistory]);
+        createDirectories([dir, dirPrices]);
         console.log(colors.magenta.italic("🔑 Logging into Steam community..."));
 
         this.community.login(
@@ -80,12 +78,6 @@ export class SteamMarketFetcher {
                         this.priceDataByItemHashName[name] = {
                             steam: getWeightedAveragePrice(prices),
                         };
-                        const hashedName = sha1(name);
-                        const filteredPrices = prices.splice(-500);
-                        await fsPromises.writeFile(
-                            `${dirPricehistory}/${hashedName}.json`,
-                            JSON.stringify(filteredPrices)
-                        );
                     }
                 })
                 .catch(error => console.log(`Error processing ${name}:`, error))

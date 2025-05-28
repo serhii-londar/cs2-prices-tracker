@@ -1,6 +1,6 @@
 {
   "name": "cs2-price-tracker",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "cs2 price tracker",
   "main": "dist/index.js",
   "keywords": [
@@ -19,7 +19,6 @@
     "@types/js-sha1": "^0.6.3",
     "colors": "^1.4.0",
     "fs": "^0.0.1-security",
-    "js-sha1": "^0.7.0",
     "steamcommunity": "^3.48.6"
   },
   "devDependencies": {
