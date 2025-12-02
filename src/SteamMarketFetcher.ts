@@ -13,7 +13,7 @@ const startTime = Date.now();
 export class SteamMarketFetcher {
     private community = new SteamCommunity();
     private priceDataByItemHashName: { [key: string]: any } = {};
-    private failedItems: string[] = [];
+    private failedItems = new Set<string>();
 
     constructor(private accountName: string, private password: string) { }
 
@@ -81,13 +81,16 @@ export class SteamMarketFetcher {
             await this.processItems(items.slice(lastIndex), lastIndex);
 
             // Retry failed items once more
-            if (this.failedItems.length > 0) {
-                console.log(colors.yellow(`🔄 Retrying ${this.failedItems.length} failed items...`));
-                const itemsToRetry = [...this.failedItems];
-                this.failedItems = []; // Reset failed items before retry
+            if (this.failedItems.size > 0) {
+                console.log(colors.yellow(`🔄 Retrying ${this.failedItems.size} failed items...`));
+                const itemsToRetry = Array.from(this.failedItems);
+                this.failedItems.clear(); // Reset failed items before retry
                 
-                for (const item of itemsToRetry) {
-                    await this.processBatch([item]);
+                // Process retries in batches for consistency
+                const batchSize = 1;
+                for (let i = 0; i < itemsToRetry.length; i += batchSize) {
+                    const batch = itemsToRetry.slice(i, i + batchSize);
+                    await this.processBatch(batch);
                 }
             }
 
@@ -112,7 +115,7 @@ export class SteamMarketFetcher {
 
             // Log final statistics
             const successCount = Object.keys(this.priceDataByItemHashName).length;
-            const failureCount = this.failedItems.length;
+            const failureCount = this.failedItems.size;
             console.log(colors.green(`✅ Successfully processed ${successCount} items`));
             if (failureCount > 0) {
                 console.log(colors.red(`❌ Failed to process ${failureCount} items`));
@@ -133,17 +136,13 @@ export class SteamMarketFetcher {
                         };
                     } else {
                         // Track items that return empty prices
-                        if (!this.failedItems.includes(name)) {
-                            this.failedItems.push(name);
-                        }
+                        this.failedItems.add(name);
                     }
                 })
                 .catch(error => {
                     console.log(`Error processing ${name}:`, error);
                     // Track items that throw errors
-                    if (!this.failedItems.includes(name)) {
-                        this.failedItems.push(name);
-                    }
+                    this.failedItems.add(name);
                 })
         );
         await Promise.all(promises);

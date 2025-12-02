@@ -17,7 +17,7 @@ async function fetchWithRetry<T>(
     delay: number = RETRY_DELAY_MS,
     operationName: string = "operation"
 ): Promise<T> {
-    let lastError: any;
+    let lastError: Error | unknown;
     
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
