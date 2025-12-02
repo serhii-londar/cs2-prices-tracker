@@ -13,38 +13,83 @@ const startTime = Date.now();
 export class SteamMarketFetcher {
     private community = new SteamCommunity();
     private priceDataByItemHashName: { [key: string]: any } = {};
-    private errorFound = false;
+    private failedItems: string[] = [];
 
     constructor(private accountName: string, private password: string) { }
+
+    private async loginWithRetry(maxRetries: number = 3, retryDelay: number = 10000): Promise<void> {
+        let lastError: Error | null = null;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                await new Promise<void>((resolve, reject) => {
+                    this.community.login(
+                        {
+                            accountName: this.accountName,
+                            password: this.password,
+                            disableMobile: true,
+                        },
+                        (err: Error | null) => {
+                            if (err) {
+                                reject(err);
+                            } else {
+                                resolve();
+                            }
+                        }
+                    );
+                });
+                console.log(colors.green("✅ Successfully logged into Steam community!"));
+                return; // Success
+            } catch (error) {
+                lastError = error as Error;
+                
+                if (attempt < maxRetries) {
+                    console.log(colors.yellow(`Login attempt ${attempt + 1}/${maxRetries} failed. Retrying in ${retryDelay}ms...`));
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                }
+            }
+        }
+
+        throw new Error(`Failed to login after ${maxRetries} attempts: ${lastError?.message}`);
+    }
 
     async run() {
         createDirectories([dir, dirPrices]);
         console.log(colors.magenta.italic("🔑 Logging into Steam community..."));
 
-        this.community.login(
-            {
-                accountName: this.accountName,
-                password: this.password,
-                disableMobile: true,
-            },
-            async (err: Error | null) => {
-                if (err) {
-                    console.log(colors.red("login:" + err));
-                    return;
-                }
-                await this.processMarketData();
-            }
-        );
+        try {
+            await this.loginWithRetry();
+            await this.processMarketData();
+        } catch (error) {
+            console.log(colors.red("Failed to login: " + error));
+        }
     }
 
     private async processMarketData() {
         try {
             console.log(colors.magenta.italic("⏳ Loading items..."));
             const items = await getAllItemNames();
+            
+            if (items.length === 0) {
+                console.error(colors.red("❌ Error: No items loaded. Aborting process."));
+                return;
+            }
+            
             console.log(colors.magenta.bold(`📦 Processing ${items.length} items.`));
             const state = loadState();
             const lastIndex = (state.lastIndex || 0) % items.length;
             await this.processItems(items.slice(lastIndex), lastIndex);
+
+            // Retry failed items once more
+            if (this.failedItems.length > 0) {
+                console.log(colors.yellow(`🔄 Retrying ${this.failedItems.length} failed items...`));
+                const itemsToRetry = [...this.failedItems];
+                this.failedItems = []; // Reset failed items before retry
+                
+                for (const item of itemsToRetry) {
+                    await this.processBatch([item]);
+                }
+            }
 
             const prices = await loadPrices();
             const newPrices = {
@@ -65,6 +110,14 @@ export class SteamMarketFetcher {
 
             savePrices(orderedNewPrices);
 
+            // Log final statistics
+            const successCount = Object.keys(this.priceDataByItemHashName).length;
+            const failureCount = this.failedItems.length;
+            console.log(colors.green(`✅ Successfully processed ${successCount} items`));
+            if (failureCount > 0) {
+                console.log(colors.red(`❌ Failed to process ${failureCount} items`));
+            }
+
         } catch (error) {
             console.error("❌ An error occurred while processing items:", error);
         }
@@ -78,9 +131,20 @@ export class SteamMarketFetcher {
                         this.priceDataByItemHashName[name] = {
                             steam: getWeightedAveragePrice(prices),
                         };
+                    } else {
+                        // Track items that return empty prices
+                        if (!this.failedItems.includes(name)) {
+                            this.failedItems.push(name);
+                        }
                     }
                 })
-                .catch(error => console.log(`Error processing ${name}:`, error))
+                .catch(error => {
+                    console.log(`Error processing ${name}:`, error);
+                    // Track items that throw errors
+                    if (!this.failedItems.includes(name)) {
+                        this.failedItems.push(name);
+                    }
+                })
         );
         await Promise.all(promises);
     }
@@ -99,10 +163,6 @@ export class SteamMarketFetcher {
 
             const batch = items.slice(i, i + batchSize);
             await this.processBatch(batch);
-
-            if (this.errorFound) {
-                return;
-            }
 
             console.log(colors.blue(`☑️ Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(items.length / batchSize)}`));
 
